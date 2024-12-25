@@ -4,6 +4,7 @@ import json
 from player import *
 from game import G08A
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 # Fill in your config information to conduct experiments.
 
@@ -33,8 +34,8 @@ def build_player(strategy, name, persona, mean=50, std=0, player_names = []):
         return ProgramPlayer(name, strategy, mean, std)
     elif strategy=="mk" :
         return Bigagent(name,persona,ENGINE)
-    elif strategy=="mknh" :
-        return Bigagent_nh(name,persona,ENGINE)
+    elif strategy=="rk" :
+        return Re_agent(name,persona,ENGINE)
     else:
         raise NotImplementedError
     
@@ -97,8 +98,8 @@ if __name__=="__main__":
     import argparse
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--player_strategy', type=str, default="mk", choices=["agent","cot","pcot","kr","reflect", "persona", "refine", "spp","mk","mknh"])
-    parser.add_argument('--computer_strategy', type=str, default="cot",choices=["agent", "fix", "last", "mono", "monorand","cot","pcot","kr","reflect", "persona", "refine", "spp","mk","mknh"])
+    parser.add_argument('--player_strategy', type=str, default="rk", choices=["agent","cot","pcot","kr","reflect", "persona", "refine", "spp","mk","rk"])
+    parser.add_argument('--computer_strategy', type=str, default="rk",choices=["agent", "fix", "last", "mono", "monorand","cot","pcot","kr","reflect", "persona", "refine", "spp","mk","rk"])
     parser.add_argument("--output_dir", type=str, default="result")
     parser.add_argument("--init_mean", type=int, default=40, help="init mean value for computer player")
     parser.add_argument("--norm_std", type=int, default=5, help="standard deviation of the random distribution of computer gamers")
@@ -113,12 +114,9 @@ if __name__=="__main__":
     #     main(args, exp_no)
 
     threads = []
+    MAX_THREADS=3
     params = [(args, exp_no) for exp_no in range(args.start_exp, args.exp_num)]
-    for thread_id, param in params:
-        t = threading.Thread(target=main, args=(thread_id, param))
-        threads.append(t)
-        t.start()
-        time.sleep(3.5) 
-
-    for t in threads:
-        t.join()
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        for args, param in params:
+            executor.submit(main, args, param)
+            time.sleep(3.5) 

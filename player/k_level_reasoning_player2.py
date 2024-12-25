@@ -33,7 +33,7 @@ class KLevelReasoningPlayer(AgentPlayer): #! 在agent 里模拟构造对局没�
         for player in players:
             self.history_biddings[player]=[]
 
-        self.k_level = 2
+        self.k_level = 4
 
     def start_round(self, round):
         self.round=round
@@ -86,53 +86,6 @@ class KLevelReasoningPlayer(AgentPlayer): #! 在agent 里模拟构造对局没�
                     return f"WARNING: You have lost 1 point of HP in this round! You now have only {hp} points of health left. You are in extreme DANGER and one step closer to death.  "
                 return f"WARNING: You have lost 1 point of HP in this round! You now have only {hp} points of health left. You are one step closer to death.  "
             return "You have successfully chosen the number closest to the target number, which is the average of all players' selected numbers multiplied by 0.8. As a result, you have won this round. All other players will now deduct 1 HP. "
-        
-        @async_adapter
-        async def conduct_predict(player,prediction,logs,player_hp):
-            hp=10
-            if player == self.name: return
-            
-            print(f"Player {self.name} conduct predict {player}") #! 重开一个对话
-            message = [{
-                "role": "system",
-                "content": self.PREDICTION_GAME_SETTING.format(name=player)
-            }]
-            for r in range(len(history_biddings[player])): #! 读每个玩家的历史
-                message.append({
-                    "role": "system",
-                    "content": self.PREDICTION_INQUIRY.format(name=player, round=r+1, hp=hp)
-                })
-                message.append({
-                    "role": "assistant",
-                    "content": self.PREDICTION_RESPONSE.format(bidding=history_biddings[player][r])
-                })
-                message.append({
-                    "role": "system",
-                    "content": round_result[r+1]
-                })
-                message.append({
-                    "role": "system",
-                    "content": add_warning(hp, player in round_winner[r+1])
-                })
-                if player not in round_winner[r+1]:
-                    hp-=1
-
-            # Predict the opponent's next move based on their historical information.
-            if hp>0:
-                message.append({
-                    "role": "system",
-                    "content": self.PREDICTION_INQUIRY.format(name=player, round=len(history_biddings[player])+1, hp=hp)
-                    })
-                next_bidding = await self.agent_simulate(message, engine=self.engine) #! message模拟了历史对局，以别人的角度问下一局出价
-                message.append({
-                    "role": "assistant",
-                    "content": next_bidding
-                })
-                prediction[player] = await self.parse_result(next_bidding)
-            else:
-                prediction[player] = history_biddings[player][-1]
-            logs[player] = message
-            player_hp[player] = hp
 
         history_biddings = deepcopy(self.history_biddings)
         round_result = deepcopy(self.round_result)
@@ -144,7 +97,51 @@ class KLevelReasoningPlayer(AgentPlayer): #! 在agent 里模拟构造对局没�
             logs = {}
             player_hp = {}
             k_round = round+k
-            await asyncio.gather(*(conduct_predict(player,prediction,logs,player_hp) for player in history_biddings))
+            for player in history_biddings:
+                hp=10
+                if player == self.name: continue
+                
+                print(f"Player {self.name} conduct predict {player}") #! 重开一个对话
+                message = [{
+                    "role": "system",
+                    "content": self.PREDICTION_GAME_SETTING.format(name=player)
+                }]
+                for r in range(len(history_biddings[player])): #! 读每个玩家的历史
+                    message.append({
+                        "role": "system",
+                        "content": self.PREDICTION_INQUIRY.format(name=player, round=r+1, hp=hp)
+                    })
+                    message.append({
+                        "role": "assistant",
+                        "content": self.PREDICTION_RESPONSE.format(bidding=history_biddings[player][r])
+                    })
+                    message.append({
+                        "role": "system",
+                        "content": round_result[r+1]
+                    })
+                    message.append({
+                        "role": "system",
+                        "content": add_warning(hp, player in round_winner[r+1])
+                    })
+                    if player not in round_winner[r+1]:
+                        hp-=1
+
+                # Predict the opponent's next move based on their historical information.
+                if hp>0:
+                    message.append({
+                        "role": "system",
+                        "content": self.PREDICTION_INQUIRY.format(name=player, round=len(history_biddings[player])+1, hp=hp)
+                        })
+                    next_bidding = await self.agent_simulate(message, engine=self.engine) #! message模拟了历史对局，以别人的角度问下一局出价
+                    message.append({
+                        "role": "assistant",
+                        "content": next_bidding
+                    })
+                    prediction[player] = await self.parse_result(next_bidding)
+                else:
+                    prediction[player] = history_biddings[player][-1]
+                logs[player] = message
+                player_hp[player] = hp
 
             if k==self.k_level-2: break #! 这是什么道理
             # If k-level >= 3, it is necessary to predict future outcomes.

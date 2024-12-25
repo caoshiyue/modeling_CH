@@ -11,13 +11,9 @@ INQUIRY_PERSONA1 = "You are a game expert, good at predicting other people's beh
 REFLECT_INQUIRY = "Review the previous round games, summarize the experience."
 INQUIRY_PCOT= "First of all, predict the next round of choices based on the choices of other players in the previous round."  #需要提供全历史
 
+
 class Bigagent(AgentPlayer):
     def __init__(self, name,persona, decision_model="gpt-4o-mini", summary_model="gpt-4o-mini", external_knowledge_api=None):
-        """
-        初始化Agent，支持两个不同的LLM模型：
-        - 决策LLM (如 GPT-4)
-        - 总结LLM (如 GPT-3.5)
-        """
         super().__init__( name, persona, decision_model)
         """
         父类会执行：
@@ -103,8 +99,7 @@ class Bigagent(AgentPlayer):
         self.message.append({'role': 'assistant', 'content': self.llm_response})
         # 更新记录的消息长度
         self.last_message_length = len(self.message)
-
-
+    
     @async_adapter
     async def parse_input(self, input_text):
         """

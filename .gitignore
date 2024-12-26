@@ -4,4 +4,5 @@
 venv/
 .env/
 *.pyc
+api_key.py
 __pycache__/

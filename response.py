@@ -2,12 +2,7 @@ import openai
 import asyncio
 import functools
 import time
-
-url= 'https://xiaoai.plus/v1'
-key='sk-JRzmgd8eRsNTIpx0B6F9B08025314669B54cBfEe4d769493'
-
-# url="https://chatapi.littlewheat.com/v1" # 备用
-# key="sk-7oU5Syutb4zP8fzllrPV29l5yPhZFHLjLclfLjcTPEg6UHFs"
+from api_key import url, key
 
 client = openai.OpenAI(
     base_url=url,
@@ -20,18 +15,6 @@ aclient = openai.AsyncOpenAI(
     # sk-xxx替换为自己的key
     api_key=key
 )
-
-# https://use.52apikey.cn/v1
-# sk-6oEeZ6AktD4UIvbc1ZqZpN52kvsj7uJ6XTVky7NcUvVGA69C
-# # 调用 ChatCompletion 接口
-# completion = client.chat.completions.create(
-#   model="gpt-4o-mini",
-#   messages=[
-#     {"role": "system", "content": "You are a helpful assistant."},
-#     {"role": "user", "content": "Hello!"}
-#   ]
-# )
-# print(completion.choices[0].message)
 
 # 异步适配器
 def async_adapter(func):
@@ -110,17 +93,4 @@ async def openai_response(**kwargs):
         # 同步上下文
         return openai_response_sync(**kwargs)
 
-
-
-# def openai_response(**kwargs):
-#     if asyncio.get_running_loop() is None:
-#         # 当前为同步上下文
-#         completion = client.chat.completions.create(**kwargs)
-#         return completion.choices[0].message.content
-#     else:
-#         # 当前为异步上下文
-#         completion = aclient.chat.completions.create(**kwargs)
-#         return completion.choices[0].message.content
-
-    
     

@@ -82,7 +82,7 @@ class Re_agent(Bigagent):
 
 
     @async_adapter
-    async def simulate(self, history, sub_players, depth=0, level_k=2):
+    async def simulate(self, history, sub_players, depth=0, level_k=1):
         """
         模拟虚拟对手的动作
 

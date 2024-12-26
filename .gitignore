@@ -1,8 +1,8 @@
 *.json
 *.sh
 *.txt
-venv/
-.env/
 *.pyc
 api_key.py
+venv/
+.env/
 __pycache__/

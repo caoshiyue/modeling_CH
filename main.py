@@ -99,7 +99,7 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--player_strategy', type=str, default="rk", choices=["agent","cot","pcot","kr","reflect", "persona", "refine", "spp","mk","rk"])
-    parser.add_argument('--computer_strategy', type=str, default="rk",choices=["agent", "fix", "last", "mono", "monorand","cot","pcot","kr","reflect", "persona", "refine", "spp","mk","rk"])
+    parser.add_argument('--computer_strategy', type=str, default="agent",choices=["agent", "fix", "last", "mono", "monorand","cot","pcot","kr","reflect", "persona", "refine", "spp","mk","rk"])
     parser.add_argument("--output_dir", type=str, default="result")
     parser.add_argument("--init_mean", type=int, default=40, help="init mean value for computer player")
     parser.add_argument("--norm_std", type=int, default=5, help="standard deviation of the random distribution of computer gamers")

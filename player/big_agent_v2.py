@@ -12,7 +12,7 @@ REFLECT_INQUIRY = "Review the previous round games, summarize the experience."
 INQUIRY_PCOT= "First of all, predict the next round of choices based on the choices of other players in the previous round."  #需要提供全历史
 
 
-class Bigagent_(AgentPlayer):
+class Bigagent(AgentPlayer):
     def __init__(self, name,persona, decision_model="gpt-4o-mini", summary_model="gpt-4o-mini", external_knowledge_api=None):
         super().__init__( name, persona, decision_model)
         """
@@ -38,23 +38,29 @@ class Bigagent_(AgentPlayer):
         # 如果是首次初始化背景规则，则提取背景规则
         if self.background_rules is None:
             extract_rules = await self.extract_background_rules(input_text)
-            self.background_rules = extract_rules["rule"]
-            self.persona = extract_rules["persona"]
-            self.rule = self.construct_rule(background_rules=self.background_rules,persona = self.persona)
-            self.history_prompt = self.rule
+            self.background_rules = extract_rules["Q1"]
+            self.persona = extract_rules["Q2"]
+            self.history_prompt = self.construct_rule(background_rules=self.background_rules,persona = self.persona)
+            print(extract_rules)
 
         # 1. 使用总结LLM提取关键信息
         parsed_input = await self.parse_input(input_text)
-
+        print(parsed_input)
         # 提取输入信息的各部分
         #current_state = parsed_input["current_state"]
-        last_step_result = parsed_input["last_step_result"] #! 如果用于 history 是否还需要精简
-        step_and_task = parsed_input["step_and_task"]
 
+        game_state = parsed_input["Q1"]
+        agent_state = parsed_input["Q2"]
+        player_state = parsed_input["Q3"]
+        player_task = parsed_input["Q4"]
+
+        step_and_task= player_state+player_task
         # 2. 历史记录更新
-        if last_step_result!="None" and last_step_result!=None:
-            self.history.append(last_step_result)
-
+        if game_state!="None" and game_state!=None:
+            game_state+=agent_state
+        else:
+            game_state=agent_state
+        self.history.append(game_state) #! 这里调整了一些
         # 3. 外部知识调用（如果需要）
         external_knowledge = ""
         if self.external_knowledge_api:
@@ -66,8 +72,7 @@ class Bigagent_(AgentPlayer):
         # 4. 构造LLM请求上下文
         
         prompt = self.construct_prompt(
-            last_step_result=last_step_result,
-            #current_state=current_state,
+            last_step_result=game_state,
             step_and_task=step_and_task,
             external_knowledge=external_knowledge
         )
@@ -99,31 +104,34 @@ class Bigagent_(AgentPlayer):
         self.message.append({'role': 'assistant', 'content': self.llm_response})
         # 更新记录的消息长度
         self.last_message_length = len(self.message)
-    
+
+
     @async_adapter
-    async def parse_input(self, input_text):
+    async def parse_input(self, input_text): #! 已改为问答式，效果显著； 是否有可能混淆上一轮状态和本轮状态
         """
         使用总结LLM提取输入文本中的关键信息。
-        包含当前状态、上一轮结果、当前步骤要求和Agent任务的合并信息。
-        人称的问题，我们需要保证system以第二人称描述
-        重复role 的问题，
-        goal 和 动作描述的问题
-        history 中 人称对不齐的问题
         """
+        flat_input_text = "\n".join([f"{item['role']}: {item['content']}." for item in input_text])
+        flat_input_text = "game record: \n"+ self.background_rules + flat_input_text
+        sys_prompt1 = """ You are a game expert.The following is a game record. Please answer 4 questions, avoid unnecessary explanations, copying the original wording as much as possible."""
+        sys_prompt2 = """ Questions:
+                            1.What are all players' action and its result in last round? if not, answer None. Retain the narrator's perspective, specify the time using "after ROUND X" of description in game first. 
+                            2.What are all player's specific status. Retain the narrator's perspective, specify the time using "before ROUND X" of description in game first.
+                            3.What is specific status information related to this player. Retain the second-person perspective, specify the time using "before ROUND X" of description in game first.
+                            4.In this round, what are the goals that this player needs to achieve, and the actions that can be chosen? Retain the second-person perspective, specify the time using "in ROUND X" of description in game first.
+                            Output the result in given JSON format:
+                            {
+                            "Q1":"answer1",
+                            "Q2":"answer2",
+                            "Q3":"answer3",
+                            "Q4":"answer4",
+                            }
+                        """ 
 
-        flat_input_text = "; ".join([f"role: {item['role']}, content: {item['content']}." for item in input_text])
-        flat_input_text= self.persona + self.background_rules + flat_input_text
-        sys_prompt = self.persona + f"""
-        Below is game record related to you. Please extract these information related to game decisions, copying the original wording as much as possible.
-        Output the result in JSON format, and ensure the JSON keys match the given schema exactly:
-        Schema: 
-        - last_step_result: Description of what happened in last round (if not, answer None), including the round number, actions of all players, and outcomes in natural text.
-        - step_and_task: Description your acheivement of game and required action in current step in natural text. Retain the second-person perspective.
-        """
-        #        - current_state: Description of the current game state, you and other players' state in natural text. 
         messages = [
-            {'role': 'system', 'content': sys_prompt},
-            {'role': 'user', 'content': flat_input_text},
+            {'role': 'system', 'content': sys_prompt1},
+            {'role': 'system', 'content': flat_input_text}, 
+            {'role': 'system', 'content': sys_prompt2},
         ]
         n_retry=0
         while n_retry<10:
@@ -139,31 +147,40 @@ class Bigagent_(AgentPlayer):
     async def extract_background_rules(self, input_text):
         """
         提取背景规则, 适用于身份基本不变的game
+        游戏规则: 与具体玩家无关的游戏基本信息，包括游戏的主题、设定和环境描述,游戏运行的核心机制和约束,明确玩家需要达成的目标和判定胜利的标准
+        角色： 当前玩家在游戏中的角色设定和背景信息，当前玩家特定的任务或目标（如果有）
         """
         flat_input_text = "; ".join([f"role: {item['role']}, content: {item['content']}." for item in input_text])
-        sys_prompt = f"""
-        The following is a description of a game. Please extract the following information, avoid unnecessary explanations. Output the result in JSON format, and ensure the JSON keys match the given schema exactly:
-        - persona: Describe your role, retain the second-person perspective.
-        - rule: Description of fixed rules or settings of game in a natural and coherent paragraph.
-        """
+        sys_prompt1 = """ You are a game expert.The following is a game record. Please answer some questions, avoid unnecessary explanations, copying the original wording as much as possible."""
+        sys_prompt2 = """ Questions:
+                        1.what is Background and basic rule about the game that is not related to specific players, include the theme and environment description of the game, the core mechanics and constraints of the game, and the objectives players need to achieve along with the criteria for determining victory. Ensure this section contains only general game information and excludes any player-specific details. Retain the narrator's perspective.
+                        2.what is the character of this player: The role and background information of the {self.name} in the game. Ensure excludes any general game information. Retain the second-person perspective.
+                        Output the result in given JSON format:
+                        {
+                        "Q1":"answer1",
+                        "Q2":"answer2",
+                        }
+                        """
         messages = [
-            {'role': 'system', 'content': sys_prompt},
+            {'role': 'system', 'content': sys_prompt1},
             {'role': 'user', 'content': flat_input_text},
+            {'role': 'system', 'content': sys_prompt2},
         ]
         response = await self.call_llm(messages, model=self.summary_llm)
         return self.extract_json_from_text(response)
 
-    def construct_prompt(self, last_step_result,  step_and_task, external_knowledge):
+    def construct_prompt(self, last_step_result,  step_and_task, external_knowledge,inquiry=INQUIRY_COT):
         """
         构造给决策LLM的完整提示上下文
         """
-        sys_prompt = f"""
-        The following is last step results of game: {last_step_result}
+        sys_prompt = f"""The following is last step results and current state of game: 
+        {last_step_result}
         """
+        ex_prompt=" "
         if external_knowledge:
-            sys_prompt+= f"An game expert suggusts {external_knowledge}. \n"
+            ex_prompt+= f"An game expert suggusts {external_knowledge}. \n"
 
-        user_prompt = step_and_task+INQUIRY_COT
+        user_prompt = step_and_task+ex_prompt+inquiry
         messages = [
             {'role': 'system', 'content': sys_prompt},
             {'role': 'system', 'content': user_prompt},
@@ -174,7 +191,8 @@ class Bigagent_(AgentPlayer):
         构造给决策LLM的完整提示上下文
         """
         messages = [
-            {'role': 'system', 'content': persona + background_rules},
+            {'role': 'system', 'content': background_rules  },
+            {'role': 'system', 'content': persona},
         ]
         return messages
 

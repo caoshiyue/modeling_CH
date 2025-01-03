@@ -3,7 +3,7 @@ import time
 import re
 import json
 import asyncio
-from .big_agent import Bigagent
+from .big_agent_v2 import Bigagent
 
 #适配当前环境
 player_persona =[

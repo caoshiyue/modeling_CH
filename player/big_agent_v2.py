@@ -59,7 +59,8 @@ class Bigagent(AgentPlayer):
         if game_state!="None" and game_state!=None:
             game_state+=agent_state
         else:
-            game_state=agent_state
+            game_state="This is first round, no previous round results. "
+            game_state+=agent_state
         self.history.append(game_state) #! 这里调整了一些
         # 3. 外部知识调用（如果需要）
         external_knowledge = ""
@@ -115,10 +116,10 @@ class Bigagent(AgentPlayer):
         flat_input_text = "game record: \n"+ self.background_rules + flat_input_text
         sys_prompt1 = """ You are a game expert.The following is a game record. Please answer 4 questions, avoid unnecessary explanations, copying the original wording as much as possible."""
         sys_prompt2 = """ Questions:
-                            1.What are all players' action and its result in last round? if not, answer None. Retain the narrator's perspective, specify the time using "after ROUND X" of description in game first. 
-                            2.What are all player's specific status. Retain the narrator's perspective, specify the time using "before ROUND X" of description in game first.
-                            3.What is specific status information related to this player. Retain the second-person perspective, specify the time using "before ROUND X" of description in game first.
-                            4.In this round, what are the goals that this player needs to achieve, and the actions that can be chosen? Retain the second-person perspective, specify the time using "in ROUND X" of description in game first.
+                            1.What are all players' action and its result in last round? if not, answer None. Retain the narrator's perspective, specify the time using "After ROUND X" of description in game first. 
+                            2.What are all player's specific status. Retain the narrator's perspective, specify the time using "Before ROUND X" of description in game first.
+                            3.What is specific status information related to this player. Retain the second-person perspective, specify the time using "Before ROUND X" of description in game first.
+                            4.In this round, what the players need to do? Retain the second-person perspective using "Please + instructions", specify the time using "In ROUND X" of description in game first.
                             Output the result in given JSON format:
                             {
                             "Q1":"answer1",
@@ -151,9 +152,9 @@ class Bigagent(AgentPlayer):
         角色： 当前玩家在游戏中的角色设定和背景信息，当前玩家特定的任务或目标（如果有）
         """
         flat_input_text = "; ".join([f"role: {item['role']}, content: {item['content']}." for item in input_text])
-        sys_prompt1 = """ You are a game expert.The following is a game record. Please answer some questions, avoid unnecessary explanations, copying the original wording as much as possible."""
+        sys_prompt1 = """ You are a game expert. The following is a game record. Please answer some questions, avoid unnecessary explanations, copying the original wording as much as possible."""
         sys_prompt2 = """ Questions:
-                        1.what is Background and basic rule about the game that is not related to specific players, include the theme and environment description of the game, the core mechanics and constraints of the game, and the objectives players need to achieve along with the criteria for determining victory. Ensure this section contains only general game information and excludes any player-specific details. Retain the narrator's perspective.
+                        1.what is background and basic rule about the game that is not related to specific players. Retain the narrator's perspective.
                         2.what is the character of this player: The role and background information of the {self.name} in the game. Ensure excludes any general game information. Retain the second-person perspective.
                         Output the result in given JSON format:
                         {
@@ -173,14 +174,13 @@ class Bigagent(AgentPlayer):
         """
         构造给决策LLM的完整提示上下文
         """
-        sys_prompt = f"""The following is last step results and current state of game: 
-        {last_step_result}
-        """
+        #sys_prompt = f"""The following is last step results and current state of game: 
+        sys_prompt = f"The following is game record: {last_step_result}"
         ex_prompt=" "
         if external_knowledge:
             ex_prompt+= f"An game expert suggusts {external_knowledge}. \n"
 
-        user_prompt = step_and_task+ex_prompt+inquiry
+        user_prompt = f"OK, {self.name}! "+ step_and_task+ex_prompt+inquiry
         messages = [
             {'role': 'system', 'content': sys_prompt},
             {'role': 'system', 'content': user_prompt},

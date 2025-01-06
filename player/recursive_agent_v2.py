@@ -15,7 +15,7 @@ player_personas =[
         ]
 player_names = ["Alex", "Bob", "Cindy", "David", "Eric"]
 sim_result= "{name} might choose {action}," 
-INQUIRY_HISTORY= "According to the history of game, finally make a decision." 
+INQUIRY_HISTORY= "Think carefully about your next step of strategy to be most likely to win, and finally make a decision." 
 INQUIRY_EXPERT="According to the game expert's prediction, think carefully about your next step of strategy to be most likely to win, and finally make a decision."
 
 class Re_agent(Bigagent):
@@ -41,11 +41,11 @@ class Re_agent(Bigagent):
             self.background_rules = extract_rules["Q1"]
             self.persona = extract_rules["Q2"]
             self.history_prompt = self.construct_rule(background_rules=self.background_rules,persona = self.persona)
-            print(extract_rules)
+            #print(extract_rules)
 
         # 1. 使用总结LLM提取关键信息
         parsed_input = await self.parse_input(input_text)
-        print(parsed_input)
+        #print(parsed_input)
         # 提取输入信息的各部分
         #current_state = parsed_input["current_state"]
 
@@ -59,7 +59,10 @@ class Re_agent(Bigagent):
         if game_state!="None" and game_state!=None:
             game_state+=agent_state
         else:
-            game_state=agent_state
+            # game_state="This is first round, no previous round results. "
+            # game_state+=agent_state
+            #! LLM幻觉问题，如果输入中带不相关的数字，则它会倾向于使用这个数字
+            game_state="None"
         self.history.append(game_state)
         # 3. 外部知识调用（如果需要）
         flat_history_text = "\n ".join([item for item in self.history])
@@ -136,6 +139,7 @@ class Re_agent(Bigagent):
             game_state="\n ".join([item for item in self.history])
             inquiry=INQUIRY_HISTORY # 它的任务是模拟普通玩家
         #! 潜在的问题是，如果每个玩家的step_and_task不同，或者step_and_task带有玩家信息，则不对
+        #! 第一轮过思考问题严重，已经达到cot级别
         sys_prompt1 = self.persona +" "+self.background_rules
         sys_prompt2 = self.construct_prompt(
         last_step_result=game_state,
@@ -146,10 +150,14 @@ class Re_agent(Bigagent):
         messages = [
             {'role': 'system', 'content': sys_prompt1},
         ]+sys_prompt2
+        # messages = [
+        #     {'role': 'system', 'content': sys_prompt1+sys_prompt2[0]["content"]},
+        #     {'role': 'system', 'content': sys_prompt2[1]["content"]},
+        # ]
+
         self.llm_response = await self.call_llm(messages, model=self.engine)
-        #print(self.llm_response)
         action = await self.parse_llm_output(self.llm_response)
-        
+        print(action)
         return # 属性赋值，无需返回
 
     

@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Fill in your config information to conduct experiments.
 
-ENGINE = "gpt-4o-mini"
+ENGINE = "gpt-4o-mini"  #"gpt-4o-mini", "gpt-4o"
 
 def build_player(strategy, name, persona, mean=50, std=0, player_names = []):
     """
@@ -103,7 +103,7 @@ if __name__=="__main__":
     parser.add_argument("--output_dir", type=str, default="result")
     parser.add_argument("--init_mean", type=int, default=40, help="init mean value for computer player")
     parser.add_argument("--norm_std", type=int, default=5, help="standard deviation of the random distribution of computer gamers")
-    parser.add_argument('--max_round', type=int, default=7)
+    parser.add_argument('--max_round', type=int, default=2)
     parser.add_argument('--start_exp', type=int, default=0)
     parser.add_argument('--exp_num', type=int, default=1)
     parser.add_argument('--player_engine', type=str, default=None, help="player's OpenAI api engine")

@@ -1,5 +1,6 @@
 from random import randint
 import numpy as np
+from response import * 
 
 class Player():
     def __init__(self, name):
@@ -70,7 +71,8 @@ class ProgramPlayer(Player): #! fixed agent 也可以用
         self.mean = mean
         self.std = std
     
-    def act(self):
+    @async_adapter
+    async def act(self):
         if self.strategy=="mono":
             bidding = self.mean
         else:

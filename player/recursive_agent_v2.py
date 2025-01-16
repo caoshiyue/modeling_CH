@@ -3,7 +3,7 @@ import time
 import re
 import json
 import asyncio
-from .big_agent_v2 import Bigagent
+from .big_agent_v2 import Bigagent2
 
 #适配当前环境
 player_personas =[
@@ -15,15 +15,16 @@ player_personas =[
         ]
 player_names = ["Alex", "Bob", "Cindy", "David", "Eric"]
 sim_result= "{name} might choose {action}," 
-INQUIRY_HISTORY= "Think carefully about your next step of strategy to be most likely to win, and finally make a decision." 
+INQUIRY_HISTORY= "Give me your choice directly." 
 INQUIRY_EXPERT="According to the game expert's prediction, think carefully about your next step of strategy to be most likely to win, and finally make a decision."
 
-class Re_agent(Bigagent):
-    def __init__(self, name,persona, decision_model="gpt-4o-mini", summary_model="gpt-4o-mini", external_knowledge_api=None,background_rules=None,history=None):
+class Re_agent(Bigagent2):
+    def __init__(self, name,persona, decision_model="gpt-4o-mini", summary_model="gpt-4o-mini", level_k=1, external_knowledge_api=None,background_rules=None,history=None):
         super().__init__( name, persona, decision_model,summary_model)
         self.player_personas = player_personas 
         self.player_names = player_names
         self.player_id= player_names.index(self.name)
+        self.level_k=level_k
         if history!=None:
             self.history = history
         if background_rules!=None:
@@ -92,7 +93,7 @@ class Re_agent(Bigagent):
 
 
     @async_adapter
-    async def simulate(self, game_state,step_and_task, sub_players, depth=0, level_k=1):
+    async def simulate(self, game_state,step_and_task, sub_players, depth=0, level_k=None):
         """
         模拟虚拟对手的动作
 
@@ -103,7 +104,8 @@ class Re_agent(Bigagent):
         :return: 主代理动作
         """
         # sub_players = [index for index, name in enumerate(player_names) if name != self.name] # 主agent中初始化
-
+        if level_k is None:
+            level_k=self.level_k
         if depth > level_k:
             return None
         if self.player_id in sub_players: #排除自己
@@ -135,11 +137,11 @@ class Re_agent(Bigagent):
             if depth==0:
                 return simulation_promt # 获得虚拟对手后，不用再决策，实际上在外面会再次请求决策
             inquiry=INQUIRY_EXPERT
-        else: # 最低一层，根据历史决策
-            game_state="\n ".join([item for item in self.history])
+        else: #! 最低一层，根据历史决策问题严重，LLM只会用最大概率，而不会思考
+            #game_state="\n ".join([item for item in self.history])
             inquiry=INQUIRY_HISTORY # 它的任务是模拟普通玩家
         #! 潜在的问题是，如果每个玩家的step_and_task不同，或者step_and_task带有玩家信息，则不对
-        #! 第一轮过思考问题严重，已经达到cot级别
+        #! 第一轮，严重overThinking, 这也跟model有关
         sys_prompt1 = self.persona +" "+self.background_rules
         sys_prompt2 = self.construct_prompt(
         last_step_result=game_state,
@@ -157,7 +159,7 @@ class Re_agent(Bigagent):
 
         self.llm_response = await self.call_llm(messages, model=self.engine)
         action = await self.parse_llm_output(self.llm_response)
-        print(action)
+        #print(self.llm_response)
         return # 属性赋值，无需返回
 
-    
+   

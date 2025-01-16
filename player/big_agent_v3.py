@@ -4,15 +4,14 @@ import re
 import json
 from .reasoning_player import AgentPlayer
 import asyncio
+from .memory import Memory
 
 INQUIRY_COT= "Think carefully about your next step of strategy to be most likely to win. Let's think step by step, and finally make a decision." 
-INQUIRY_PERSONA2 = "Don't forget your expert status, use your expertise to win this round!"
-INQUIRY_PERSONA1 = "You are a game expert, good at predicting other people's behavior and deducing calculations, and using the most favorable strategy to win the game."
 REFLECT_INQUIRY = "Review the previous round games, summarize the experience."
-INQUIRY_PCOT= "First of all, predict the next round of choices based on the choices of other players in the previous round."  #需要提供全历史
+
 player_names = ["Alex", "Bob", "Cindy", "David", "Eric"]
 
-class Bigagent2(AgentPlayer):
+class Bigagent(AgentPlayer):
     def __init__(self, name,persona, decision_model="gpt-4o-mini", summary_model="gpt-4o-mini", external_knowledge_api=None):
         super().__init__( name, persona, decision_model)
         """
@@ -29,6 +28,8 @@ class Bigagent2(AgentPlayer):
         self.history = []  # 仅记录last_step_result历史
         self.history_prompt = []
         self.background_rules = None  # 背景规则
+        self.memory=Memory("game_memory.json",summary_model)
+        self.opponent_dict = {}
 
     @async_adapter
     async def MDP_act(self, input_text):
@@ -38,9 +39,10 @@ class Bigagent2(AgentPlayer):
         # 如果是首次初始化背景规则，则提取背景规则
         if self.background_rules is None:
             extract_rules = await self.extract_background_rules(input_text)
-            self.background_rules = extract_rules["Q1"]
+            self.background_rules = extract_rules["Q1"] +' The names of five players are Alex, Bob, Cindy, David and Eric.'
             self.persona = extract_rules["Q2"]
             self.history_prompt = self.construct_rule(background_rules=self.background_rules,persona = self.persona)
+            self.memory.set_background(self.background_rules)
             print(extract_rules)
 
         # 1. 使用总结LLM提取关键信息
@@ -56,12 +58,10 @@ class Bigagent2(AgentPlayer):
 
         step_and_task= player_state+player_task
         # 2. 历史记录更新
-        memory_query=""
+        memory_query=None
         if game_state!="None" and game_state!=None:
             game_state+=agent_state
             self.history.append(game_state) #! 这里调整了一些
-            memory_query = await self.extract_specific_state(input_text)
-            print(memory_query)
         else:
             # game_state="This is first round, no previous round results. "
             # game_state+=agent_state
@@ -70,11 +70,12 @@ class Bigagent2(AgentPlayer):
         
         # 3. 外部知识调用（如果需要）
         external_knowledge = ""
-        if self.external_knowledge_api:
-            external_knowledge = await self.external_knowledge_api.query(
-                #current_state=current_state,
-                step_and_task=step_and_task
-            )
+        memory_query = await self.extract_specific_state(input_text)
+        if memory_query!=None:
+            await self.process_memory_query(memory_query, player_task,False)
+            new_dict = {key: str(value[1])+'\n' for key, value in self.opponent_dict.items()}
+            external_knowledge=str(new_dict)
+
         flat_history_text = "\n ".join([item for item in self.history])
         # 4. 构造LLM请求上下文
         
@@ -178,16 +179,16 @@ class Bigagent2(AgentPlayer):
 
 
     @async_adapter
-    async def extract_specific_state(self, input_text): #! 已改为问答式，效果显著； 是否有可能混淆上一轮状态和本轮状态
+    async def extract_specific_state(self, input_text): #!此处记录的是当前状态，在此游戏中 = 上一轮number+上一轮对手动作
         """
         使用总结LLM提取输入文本中的关键信息。
         """
         flat_input_text = "\n".join([f"{item['role']}: {item['content']}." for item in input_text])
-        flat_input_text = "game record: \n"+ self.background_rules + flat_input_text
+        flat_input_text = "game record: \n"+ self.background_rules  + flat_input_text
         sys_prompt1 = """ You are a game expert.The following is a game record. Please answer following questions, avoid unnecessary explanations, if no answer, answer None."""
         sys_prompt2 = """ Questions:
-                            1. What is the value of 0.8 times the average last round?  Answer like "the value of 0.8 times the averag is X".
-                            2. What are the action of other players (Not this player)? Answer like "player choose X". 
+                            1. What is the value of 0.8 times the average last round? If it is first round, answer "the target value is unknow", else answer like "the target value is X".
+                            2. What are the action of other players (Not this player) in last round? If it is first round, answer "", else answer like "the player choose X". 
                             Output the result in given JSON format:
                             {
                             "Q1":"answer1",
@@ -212,6 +213,37 @@ class Bigagent2(AgentPlayer):
                 n_retry+=1
         return js_dict
 
+    @async_adapter
+    async def process_memory_query(self,js_dict, step_and_task,fast_infer=False):
+        #* 首先，根据当前状态反思
+        if fast_infer==False:
+            for player, value in self.opponent_dict.items():
+                idx=value[0]
+                re_reason =  await self.memory.reflect(idx,js_dict[player])  # 动作是动作
+                if re_reason:
+                    res_action = await self.re_simulate( self.memory.get_action(idx)[1],self.memory.get_action(idx)[0],js_dict[player])
+                    self.memory.update_action(idx, res_action)
+
+        #* 然后，对新state query
+        q1_value = js_dict['Q1']
+        opponent_dict={}
+        async def process_player(player, js_dict, q1_value, opponent_dict, step_and_task,fast_infer):
+            if player in js_dict:
+                q = q1_value + ', ' + js_dict[player] # 动作是状态
+                idx, action=await self.memory.query(q)  
+                if action!=None:
+                    opponent_dict[player]=(idx, action[0])
+                else:
+                    if fast_infer==False:
+                        res_action = await self.simulate( q1_value,js_dict[player],step_and_task,player)
+                        idx=self.memory.add_record(q, res_action)
+                        opponent_dict[player]=(idx,res_action[0])
+        if fast_infer:
+            await asyncio.gather(*( process_player(player, js_dict, q1_value, opponent_dict, step_and_task,fast_infer)for player in player_names))
+        else:
+            for player in player_names:#! 学习过程中不能聚合
+                process_player(player, js_dict, q1_value, opponent_dict, step_and_task,fast_infer)
+        self.opponent_dict=opponent_dict
 
 
     def construct_prompt(self, last_step_result,  step_and_task, external_knowledge,inquiry=INQUIRY_COT):
@@ -231,7 +263,7 @@ class Bigagent2(AgentPlayer):
             ]
         ex_prompt=" "
         if external_knowledge:
-            ex_prompt+= f"An game expert suggusts {external_knowledge}. \n"
+            ex_prompt+= f"An game expert predict other players' strategies are: {external_knowledge}. \n"
 
         user_prompt = f"OK, {self.name}! "+ step_and_task+ex_prompt+inquiry
         messages += [
@@ -248,6 +280,69 @@ class Bigagent2(AgentPlayer):
             {'role': 'system', 'content': persona},
         ]
         return messages
+
+    @async_adapter
+    async def simulate(self, game_state, last_action,step_and_task,player_name):
+        sys_prompt1 = "You are a game expert involved in a survive challenge." +self.background_rules
+        inquiry =f"Let's consider briefly about this PLAYER's belief and strategy and make a prediction of possible actions this PLAYER may choose at the end of reasoning. Answer briefly. DO NOT mention player's name."
+        messages = [
+            {'role': 'system', 'content': sys_prompt1},
+            {'role': 'system', 'content': f"In last round, one PLAYER's action is: {last_action}, and {game_state}. "},
+            {'role': 'system', 'content': f"OK, now all players are required to make a decision: {step_and_task}."},
+            {'role': 'system', 'content': inquiry},
+        ]
+
+        n_retry=0
+        pattern = r"PREDICT (-?\d+)"
+        while n_retry<10:
+            try:
+                llm_response = await self.call_llm(messages, model=self.engine)
+                #match = re.search(pattern, llm_response)
+                #llm_response  = re.sub(pattern, '', llm_response)
+                #action = int(match.group(1))
+                n_retry=10
+            except: #再试一次
+                n_retry+=1
+    
+        return (llm_response,messages)
+    
+    @async_adapter
+    async def re_simulate(self, messages, last_reasoning, new_last_action):
+
+        inquiry =f"""Now, analyze this action to see if they reveal any new strategies or beliefs, 
+        think about why your reasoning is flawed, rather than simply remembering the action.
+        Based on the above analysis, update your chain of reasoning to make it more general and flexible for similar situations in the future
+        """
+        new_messages = [
+            {'role': 'assistant', 'content': last_reasoning},
+            {'role': 'system', 'content': f"But actually, this PLAYER's action is: {new_last_action}"},
+            {'role': 'system', 'content': inquiry},
+        ]
+        messages+=new_messages
+        n_retry=0
+        while n_retry<10:
+            try:
+                llm_response = await self.call_llm(messages, model=self.engine)
+                n_retry=10
+            except: #再试一次
+                n_retry+=1
+        new_messages=[
+                    {'role': 'assistant', 'content': llm_response},
+                    {'role': 'system', 'content': "Now you encountering similar situation again: "},
+                    messages[1],
+                    {'role': 'system', 'content': "Let's consider about this PLAYER's belief and strategy and make a prediction of possible actions this PLAYER may choose at the end of reasoning. Answer briefly. DO NOT mention player's name."},
+                ]
+        messages+=new_messages
+        n_retry=0
+        while n_retry<10:
+            try:
+                llm_response = await self.call_llm(messages, model=self.engine)
+                n_retry=10
+            except: #再试一次
+                n_retry+=1
+
+        return (llm_response,messages)
+
 
     @async_adapter
     async def call_llm(self, prompt, model):
@@ -267,12 +362,13 @@ class Bigagent2(AgentPlayer):
         return response
 
     @async_adapter
-    async def parse_llm_output(self, llm_response):
+    async def parse_llm_output(self, llm_response,record=True):
         """
         将LLM的输出解析为可执行动作
         """
         action= await self.parse_result(llm_response)
-        self.biddings.append(action)
+        if record:
+            self.biddings.append(action)
         return action
 
     def extract_json_from_text(self, text):
